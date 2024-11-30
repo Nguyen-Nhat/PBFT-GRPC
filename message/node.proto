@@ -1,0 +1,97 @@
+syntax = "proto3";
+package pbft.message;
+option go_package = "pbft/message";
+
+service NodeService {
+  // PrePrepare message
+  rpc PrePrepare(PrePrepareRequest) returns (PrePrepareResponse);
+  // Prepare message
+  rpc Prepare(PrepareRequest) returns (PrepareResponse);
+  // Commit message
+  rpc Commit(CommitRequest) returns (CommitResponse);
+  // Request message
+  rpc Request(RequestRequest) returns (RequestResponse);
+  // AddNode message
+  rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
+}
+
+// CommitRequest - <v, n, d, m>
+message PrePrepareRequest {
+  // ViewId - v
+  int32 view_id = 1;
+  // SequenceId - n
+  int32 sequence_id = 2;
+  // Digest - d
+  string digest = 3;
+  // Data - m
+  Data data = 4;
+}
+
+// PrePrepareResponse
+message PrePrepareResponse {
+}
+
+// PrepareRequest - <v, n, d, i>
+message PrepareRequest {
+  // ViewId - v
+  int32 view_id = 1;
+  // SequenceId - n
+  int32 sequence_id = 2;
+  // Digest - d
+  string digest = 3;
+  // Replica Id - i
+  int32 replica_id = 4;
+}
+
+// PrepareResponse
+message PrepareResponse {
+}
+
+// CommitRequest - <v, n, d, i>
+message CommitRequest {
+  // ViewId - v
+  int32 view_id = 1;
+  // SequenceId - n
+  int32 sequence_id = 2;
+  // Digest - d
+  string digest = 3;
+  // Replica Id - i
+  int32 replica_id = 4;
+}
+
+// CommitResponse
+message CommitResponse {
+}
+
+// RequestRequest
+message RequestRequest {
+  Data data = 1;
+}
+
+// RequestResponse
+message RequestResponse {
+}
+
+// AddNodeRequest
+message AddNodeRequest {
+  // Address
+  int32 port = 1;
+}
+
+// AddNodeResponse
+message AddNodeResponse {
+  // NodeId
+  int32 node_id = 1;
+  // OtherNodeAddr
+  repeated int32 other_node_ports = 2;
+}
+
+// Data
+message Data {
+  // PreviousBlockHash
+  string previous_block_hash = 1;
+  // BlockHash
+  string block_hash = 2;
+  // BlockHeight
+  string block_height = 3;
+}
