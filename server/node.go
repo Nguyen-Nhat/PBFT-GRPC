@@ -103,9 +103,6 @@ type Node struct {
 }
 
 func (n *Node) Request(ctx context.Context, req *message.RequestRequest) (*message.RequestResponse, error) {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
 	if n.isPrimaryNode() {
 		digest, err := hash.Hash(req.Data)
 		if err != nil {
@@ -134,9 +131,6 @@ func (n *Node) Request(ctx context.Context, req *message.RequestRequest) (*messa
 }
 
 func (n *Node) PrePrepare(ctx context.Context, req *message.PrePrepareRequest) (*message.PrePrepareResponse, error) {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
-
 	if digest, err := hash.Hash(req.Data); err != nil || digest != req.Digest {
 		return nil, fmt.Errorf("Invalid Data")
 	}
@@ -172,15 +166,11 @@ func (n *Node) PrePrepare(ctx context.Context, req *message.PrePrepareRequest) (
 }
 
 func (n *Node) Prepare(ctx context.Context, req *message.PrepareRequest) (*message.PrepareResponse, error) {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
 
 	return &message.PrepareResponse{}, nil
 }
 
 func (n *Node) Commit(ctx context.Context, req *message.CommitRequest) (*message.CommitResponse, error) {
-	n.mutex.Lock()
-	defer n.mutex.Unlock()
 
 	return &message.CommitResponse{}, nil
 }
@@ -228,6 +218,9 @@ func (n *Node) isPrimaryNode() bool {
 }
 
 func (n *Node) increaseSequenceId() int32 {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
 	n.sequenceId++
 	return n.sequenceId
 }
