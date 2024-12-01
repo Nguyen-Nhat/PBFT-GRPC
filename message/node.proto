@@ -39,8 +39,8 @@ message PrepareRequest {
   int32 sequence_id = 2;
   // Digest - d
   string digest = 3;
-  // Replica Id - i
-  int32 replica_id = 4;
+  // Node Id - i
+  int32 node_id = 4;
 }
 
 // PrepareResponse
@@ -55,8 +55,8 @@ message CommitRequest {
   int32 sequence_id = 2;
   // Digest - d
   string digest = 3;
-  // Replica Id - i
-  int32 replica_id = 4;
+  // Node Id - i
+  int32 node_id = 4;
 }
 
 // CommitResponse

@@ -7,6 +7,8 @@ import (
 	"google.golang.org/grpc/reflection"
 	"net"
 	"pbft/constz"
+	"pbft/interceptor"
+	"pbft/library/hash"
 	"pbft/library/parallel"
 	"pbft/library/slice"
 	"pbft/message"
@@ -18,16 +20,20 @@ func StartNode(port int32, isByzantine bool) error {
 		ctx            = context.Background()
 		address        = fmt.Sprintf(constz.BaseEndpointFormat, port)
 		nodeId         int32
-		isPrimaryNode  = port == constz.PrimaryNodePort
 		otherNodePorts = make([]int32, 0)
 		nodeClients    = make(map[int32]message.NodeServiceClient)
+		prePrepareLog  = make(map[int32]*PrePrepareLog)
+		prepareLog     = make(map[int32]int32)
+		commitLog      = make(map[int32]int32)
 	)
-	node := &Node{}
+	node := &Node{port: port}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return err
 	}
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(interceptor.UnaryLogErrorInterceptor()),
+	)
 	message.RegisterNodeServiceServer(grpcServer, node)
 
 	reflection.Register(grpcServer)
@@ -39,7 +45,7 @@ func StartNode(port int32, isByzantine bool) error {
 			done <- err
 		}
 	}()
-	if isPrimaryNode {
+	if node.isPrimaryNode() {
 		isByzantine = false
 		nodeId = 0
 	} else {
@@ -68,38 +74,115 @@ func StartNode(port int32, isByzantine bool) error {
 	node.isByzantine = isByzantine
 	node.otherNodePorts = otherNodePorts
 	node.nodeClients = nodeClients
+	node.prePrepareLog = prePrepareLog
+	node.prepareLog = prepareLog
+	node.commitLog = commitLog
 
-	err = <-done
-	if err != nil {
+	if err = <-done; err != nil {
 		return err
 	}
 	return nil
 }
 
+type PrePrepareLog struct {
+	digest string
+	data   *message.Data
+}
 type Node struct {
 	message.UnimplementedNodeServiceServer
 	nodeId         int32
 	port           int32
 	isByzantine    bool
 	otherNodePorts []int32
+	sequenceId     int32
 	nodeClients    map[int32]message.NodeServiceClient
+	prePrepareLog  map[int32]*PrePrepareLog
+	prepareLog     map[int32]int32
+	commitLog      map[int32]int32
 	mutex          sync.Mutex
 }
 
+func (n *Node) Request(ctx context.Context, req *message.RequestRequest) (*message.RequestResponse, error) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	if n.isPrimaryNode() {
+		digest, err := hash.Hash(req.Data)
+		if err != nil {
+			return nil, err
+		}
+		prePrepareMessage := &message.PrePrepareRequest{
+			ViewId:     0,
+			Digest:     digest,
+			SequenceId: n.increaseSequenceId(),
+			Data:       req.Data,
+		}
+
+		p := parallel.New(ctx)
+		for _, client := range n.nodeClients {
+			func(client message.NodeServiceClient) {
+				_ = p.Register(parallel.NewFunc(
+					prePrepareMessage,
+					func(ctx context.Context, request *message.PrePrepareRequest) (*message.PrePrepareResponse, error) {
+						return client.PrePrepare(ctx, request)
+					},
+				))
+			}(client)
+		}
+	}
+	return &message.RequestResponse{}, nil
+}
+
 func (n *Node) PrePrepare(ctx context.Context, req *message.PrePrepareRequest) (*message.PrePrepareResponse, error) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
+	if digest, err := hash.Hash(req.Data); err != nil || digest != req.Digest {
+		return nil, fmt.Errorf("Invalid Data")
+	}
+
+	if _, ok := n.prePrepareLog[req.SequenceId]; ok {
+		return nil, fmt.Errorf("Duplicate sequenceId")
+	}
+
+	n.prePrepareLog[req.SequenceId] = &PrePrepareLog{
+		digest: req.Digest,
+		data:   req.Data,
+	}
+
+	prepareMessage := &message.PrepareRequest{
+		ViewId:     0,
+		Digest:     req.Digest,
+		SequenceId: req.SequenceId,
+		NodeId:     n.nodeId,
+	}
+
+	p := parallel.New(ctx)
+	for _, client := range n.nodeClients {
+		func(client message.NodeServiceClient) {
+			_ = p.Register(parallel.NewFunc(
+				prepareMessage,
+				func(ctx context.Context, request *message.PrepareRequest) (*message.PrepareResponse, error) {
+					return client.Prepare(ctx, request)
+				},
+			))
+		}(client)
+	}
 	return &message.PrePrepareResponse{}, nil
 }
 
 func (n *Node) Prepare(ctx context.Context, req *message.PrepareRequest) (*message.PrepareResponse, error) {
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
+
 	return &message.PrepareResponse{}, nil
 }
 
 func (n *Node) Commit(ctx context.Context, req *message.CommitRequest) (*message.CommitResponse, error) {
-	return &message.CommitResponse{}, nil
-}
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
 
-func (n *Node) Request(ctx context.Context, req *message.RequestRequest) (*message.RequestResponse, error) {
-	return &message.RequestResponse{}, nil
+	return &message.CommitResponse{}, nil
 }
 
 func (n *Node) AddNode(ctx context.Context, req *message.AddNodeRequest) (*message.AddNodeResponse, error) {
@@ -113,7 +196,7 @@ func (n *Node) AddNode(ctx context.Context, req *message.AddNodeRequest) (*messa
 	}
 	n.nodeClients[req.Port] = message.NewNodeServiceClient(conn)
 
-	if n.nodeId == constz.PrimaryNodeId {
+	if n.isPrimaryNode() {
 		p := parallel.New(ctx)
 		for _, port := range clones {
 			func(port int32) {
@@ -138,4 +221,13 @@ func (n *Node) AddNode(ctx context.Context, req *message.AddNodeRequest) (*messa
 		NodeId:         int32(len(clones) + 1),
 		OtherNodePorts: clones,
 	}, nil
+}
+
+func (n *Node) isPrimaryNode() bool {
+	return n.nodeId == constz.PrimaryNodeId
+}
+
+func (n *Node) increaseSequenceId() int32 {
+	n.sequenceId++
+	return n.sequenceId
 }
