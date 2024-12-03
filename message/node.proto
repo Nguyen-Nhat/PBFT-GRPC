@@ -13,6 +13,8 @@ service NodeService {
   rpc Request(RequestRequest) returns (RequestResponse);
   // AddNode message
   rpc AddNode(AddNodeRequest) returns (AddNodeResponse);
+  // GetNodePort
+  rpc GetListOtherPort(GetListOtherPortRequest) returns (GetListOtherPortResponse);
 }
 
 // CommitRequest - <v, n, d, m>
@@ -84,6 +86,16 @@ message AddNodeResponse {
   int32 node_id = 1;
   // OtherNodeAddr
   repeated int32 other_node_ports = 2;
+}
+
+// ListNodePortRequest
+message GetListOtherPortRequest {
+
+}
+
+// ListNodePortResponse
+message GetListOtherPortResponse {
+  repeated int32 ports = 1;
 }
 
 // Data

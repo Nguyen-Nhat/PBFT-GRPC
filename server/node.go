@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	"math/rand"
 	"net"
 	"pbft/constz"
 	"pbft/interceptor"
 	"pbft/library/hash"
+	"pbft/library/math"
 	"pbft/library/parallel"
+	"pbft/library/random"
 	"pbft/library/slice"
 	"pbft/message"
 	"sync"
@@ -23,8 +26,8 @@ func StartNode(port int32, isByzantine bool) error {
 		otherNodePorts = make([]int32, 0)
 		nodeClients    = make(map[int32]message.NodeServiceClient)
 		prePrepareLog  = make(map[int32]*PrePrepareLog)
-		prepareLog     = make(map[int32]int32)
-		commitLog      = make(map[int32]int32)
+		prepareLog     = make(map[int32]*LogEntry)
+		commitLog      = make(map[int32]*LogEntry)
 	)
 	node := &Node{port: port}
 	listener, err := net.Listen("tcp", address)
@@ -88,6 +91,10 @@ type PrePrepareLog struct {
 	digest string
 	data   *message.Data
 }
+type LogEntry struct {
+	count     int32
+	processed bool
+}
 type Node struct {
 	message.UnimplementedNodeServiceServer
 	nodeId         int32
@@ -97,12 +104,14 @@ type Node struct {
 	sequenceId     int32
 	nodeClients    map[int32]message.NodeServiceClient
 	prePrepareLog  map[int32]*PrePrepareLog
-	prepareLog     map[int32]int32
-	commitLog      map[int32]int32
+	prepareLog     map[int32]*LogEntry
+	commitLog      map[int32]*LogEntry
 	mutex          sync.Mutex
 }
 
 func (n *Node) Request(ctx context.Context, req *message.RequestRequest) (*message.RequestResponse, error) {
+	fmt.Printf("Node %v received request from client with content: \n", n.nodeId)
+	fmt.Println(req)
 	if n.isPrimaryNode() {
 		digest, err := hash.Hash(req.Data)
 		if err != nil {
@@ -131,6 +140,8 @@ func (n *Node) Request(ctx context.Context, req *message.RequestRequest) (*messa
 }
 
 func (n *Node) PrePrepare(ctx context.Context, req *message.PrePrepareRequest) (*message.PrePrepareResponse, error) {
+	fmt.Printf("Node %v received preprepare request with content: \n", n.nodeId)
+	fmt.Println(req)
 	if digest, err := hash.Hash(req.Data); err != nil || digest != req.Digest {
 		return nil, fmt.Errorf("Invalid Data")
 	}
@@ -144,18 +155,19 @@ func (n *Node) PrePrepare(ctx context.Context, req *message.PrePrepareRequest) (
 		data:   req.Data,
 	}
 
-	prepareMessage := &message.PrepareRequest{
-		ViewId:     0,
-		Digest:     req.Digest,
-		SequenceId: req.SequenceId,
-		NodeId:     n.nodeId,
-	}
-
 	p := parallel.New(ctx)
 	for _, client := range n.nodeClients {
 		func(client message.NodeServiceClient) {
 			_ = p.Register(parallel.NewFunc(
-				prepareMessage,
+				&message.PrepareRequest{
+					ViewId: 0,
+					Digest: math.TernaryOp(n.isByzantineNode() && rand.Intn(2) == 0,
+						random.RandomString(1024),
+						req.Digest,
+					),
+					SequenceId: req.SequenceId,
+					NodeId:     n.nodeId,
+				},
 				func(ctx context.Context, request *message.PrepareRequest) (*message.PrepareResponse, error) {
 					return client.Prepare(ctx, request)
 				},
@@ -166,12 +178,70 @@ func (n *Node) PrePrepare(ctx context.Context, req *message.PrePrepareRequest) (
 }
 
 func (n *Node) Prepare(ctx context.Context, req *message.PrepareRequest) (*message.PrepareResponse, error) {
+	fmt.Printf("Node %v received prepare request with content: \n", n.nodeId)
+	fmt.Println(req)
+	log, ok := n.prePrepareLog[req.SequenceId]
+	if !ok || log.digest != req.Digest {
+		return nil, fmt.Errorf("Invalid Prepare Request: digest mismatch or sequence ID not found")
+	}
 
+	entry, exists := n.prepareLog[req.SequenceId]
+	if !exists {
+		entry = &LogEntry{count: 1, processed: false}
+		n.prepareLog[req.SequenceId] = entry
+	}
+	entry.count++
+
+	if entry.count >= n.quorumSize() && !entry.processed {
+		entry.processed = true
+
+		p := parallel.New(ctx)
+		for _, client := range n.nodeClients {
+			func(client message.NodeServiceClient) {
+				_ = p.Register(parallel.NewFunc(
+					&message.CommitRequest{
+						ViewId: req.ViewId,
+						Digest: math.TernaryOp(n.isByzantineNode() && rand.Intn(2) == 0,
+							random.RandomString(1024),
+							req.Digest,
+						),
+						SequenceId: req.SequenceId,
+						NodeId:     n.nodeId,
+					},
+					func(ctx context.Context, request *message.CommitRequest) (*message.CommitResponse, error) {
+						return client.Commit(ctx, request)
+					},
+				))
+			}(client)
+		}
+	}
 	return &message.PrepareResponse{}, nil
 }
 
 func (n *Node) Commit(ctx context.Context, req *message.CommitRequest) (*message.CommitResponse, error) {
+	fmt.Printf("Node %v received commit request with content: \n", n.nodeId)
+	fmt.Println(req)
+	log, ok := n.prePrepareLog[req.SequenceId]
+	if !ok || log.digest != req.Digest {
+		return nil, fmt.Errorf("Invalid Commit Request: digest mismatch or sequence ID not found")
+	}
 
+	entry, exists := n.commitLog[req.SequenceId]
+	if !exists {
+		entry = &LogEntry{count: 1, processed: false}
+		n.commitLog[req.SequenceId] = entry
+	}
+	entry.count++
+
+	if entry.count >= n.quorumSize() && !entry.processed {
+		entry.processed = true
+		// do something here in reality
+		fmt.Printf("Transaction committed: sequence ID %d\n", req.SequenceId)
+
+		delete(n.prePrepareLog, req.SequenceId)
+		delete(n.prepareLog, req.SequenceId)
+		delete(n.commitLog, req.SequenceId)
+	}
 	return &message.CommitResponse{}, nil
 }
 
@@ -206,13 +276,22 @@ func (n *Node) AddNode(ctx context.Context, req *message.AddNodeRequest) (*messa
 		clones = make([]int32, 0)
 	}
 
-	fmt.Printf("Add node: %v successfully\n", req.Port)
+	fmt.Printf("Node %v connect node: %v successfully\n", n.port, req.Port)
 	return &message.AddNodeResponse{
 		NodeId:         int32(len(clones) + 1),
 		OtherNodePorts: clones,
 	}, nil
 }
 
+func (n *Node) GetListOtherPort(ctx context.Context, req *message.GetListOtherPortRequest) (*message.GetListOtherPortResponse, error) {
+	return &message.GetListOtherPortResponse{
+		Ports: slice.Make(n.otherNodePorts...),
+	}, nil
+}
+
+func (n *Node) isByzantineNode() bool {
+	return n.isByzantine == true
+}
 func (n *Node) isPrimaryNode() bool {
 	return n.nodeId == constz.PrimaryNodeId
 }
@@ -223,4 +302,7 @@ func (n *Node) increaseSequenceId() int32 {
 
 	n.sequenceId++
 	return n.sequenceId
+}
+func (n *Node) quorumSize() int32 {
+	return (int32(len(n.otherNodePorts))+1)*2/3 + 1
 }

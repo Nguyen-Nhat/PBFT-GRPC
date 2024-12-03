@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"github.com/urfave/cli/v2"
 	"pbft/server"
 )
@@ -23,8 +22,8 @@ var (
 		Description: "Start client",
 		ArgsUsage:   "",
 		Action: func(c *cli.Context) error {
-			fmt.Println("client called")
-			return nil
+			err := server.StartClient()
+			return err
 		},
 	}
 	nodeCommand = &cli.Command{

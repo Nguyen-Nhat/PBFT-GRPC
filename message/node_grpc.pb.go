@@ -19,11 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	NodeService_PrePrepare_FullMethodName = "/pbft.message.NodeService/PrePrepare"
-	NodeService_Prepare_FullMethodName    = "/pbft.message.NodeService/Prepare"
-	NodeService_Commit_FullMethodName     = "/pbft.message.NodeService/Commit"
-	NodeService_Request_FullMethodName    = "/pbft.message.NodeService/Request"
-	NodeService_AddNode_FullMethodName    = "/pbft.message.NodeService/AddNode"
+	NodeService_PrePrepare_FullMethodName       = "/pbft.message.NodeService/PrePrepare"
+	NodeService_Prepare_FullMethodName          = "/pbft.message.NodeService/Prepare"
+	NodeService_Commit_FullMethodName           = "/pbft.message.NodeService/Commit"
+	NodeService_Request_FullMethodName          = "/pbft.message.NodeService/Request"
+	NodeService_AddNode_FullMethodName          = "/pbft.message.NodeService/AddNode"
+	NodeService_GetListOtherPort_FullMethodName = "/pbft.message.NodeService/GetListOtherPort"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -40,6 +41,8 @@ type NodeServiceClient interface {
 	Request(ctx context.Context, in *RequestRequest, opts ...grpc.CallOption) (*RequestResponse, error)
 	// AddNode message
 	AddNode(ctx context.Context, in *AddNodeRequest, opts ...grpc.CallOption) (*AddNodeResponse, error)
+	// GetNodePort
+	GetListOtherPort(ctx context.Context, in *GetListOtherPortRequest, opts ...grpc.CallOption) (*GetListOtherPortResponse, error)
 }
 
 type nodeServiceClient struct {
@@ -100,6 +103,16 @@ func (c *nodeServiceClient) AddNode(ctx context.Context, in *AddNodeRequest, opt
 	return out, nil
 }
 
+func (c *nodeServiceClient) GetListOtherPort(ctx context.Context, in *GetListOtherPortRequest, opts ...grpc.CallOption) (*GetListOtherPortResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetListOtherPortResponse)
+	err := c.cc.Invoke(ctx, NodeService_GetListOtherPort_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility
@@ -114,6 +127,8 @@ type NodeServiceServer interface {
 	Request(context.Context, *RequestRequest) (*RequestResponse, error)
 	// AddNode message
 	AddNode(context.Context, *AddNodeRequest) (*AddNodeResponse, error)
+	// GetNodePort
+	GetListOtherPort(context.Context, *GetListOtherPortRequest) (*GetListOtherPortResponse, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -135,6 +150,9 @@ func (UnimplementedNodeServiceServer) Request(context.Context, *RequestRequest) 
 }
 func (UnimplementedNodeServiceServer) AddNode(context.Context, *AddNodeRequest) (*AddNodeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AddNode not implemented")
+}
+func (UnimplementedNodeServiceServer) GetListOtherPort(context.Context, *GetListOtherPortRequest) (*GetListOtherPortResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetListOtherPort not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 
@@ -239,6 +257,24 @@ func _NodeService_AddNode_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_GetListOtherPort_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetListOtherPortRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).GetListOtherPort(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_GetListOtherPort_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).GetListOtherPort(ctx, req.(*GetListOtherPortRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -265,6 +301,10 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddNode",
 			Handler:    _NodeService_AddNode_Handler,
+		},
+		{
+			MethodName: "GetListOtherPort",
+			Handler:    _NodeService_GetListOtherPort_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
