@@ -44,6 +44,7 @@ func StartNode(port int32, isByzantine bool) error {
 	done := make(chan error)
 
 	go func() {
+		fmt.Println("Start successfully")
 		if err := grpcServer.Serve(listener); err != nil {
 			done <- err
 		}
@@ -61,7 +62,6 @@ func StartNode(port int32, isByzantine bool) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Node Id is %v\n", result.GetNodeId())
 
 		otherNodePorts = append(otherNodePorts, constz.PrimaryNodePort)
 		nodeId = result.NodeId
@@ -73,7 +73,6 @@ func StartNode(port int32, isByzantine bool) error {
 	}
 
 	node.nodeId = nodeId
-	node.port = port
 	node.isByzantine = isByzantine
 	node.otherNodePorts = otherNodePorts
 	node.nodeClients = nodeClients
@@ -293,7 +292,7 @@ func (n *Node) isByzantineNode() bool {
 	return n.isByzantine == true
 }
 func (n *Node) isPrimaryNode() bool {
-	return n.nodeId == constz.PrimaryNodeId
+	return n.port == constz.PrimaryNodePort
 }
 
 func (n *Node) increaseSequenceId() int32 {
